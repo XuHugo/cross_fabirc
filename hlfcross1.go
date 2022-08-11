@@ -13,7 +13,7 @@ import(
 type A struct {
 
 }
-const PROTOCOL_VERSION = "1.0.0"
+
 const TxResultEnum = {'INIT':'0',   'ACK_SUCCESS':'1',  'ACK_FAIL':'2',     'ACK_TIMEOUT':'3'}
 const TxRefundedEnum = {'NONE':'0',     'TODO':'1',     'REFUNDED': '2'}
 
