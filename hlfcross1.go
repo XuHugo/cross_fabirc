@@ -5,6 +5,7 @@ import(
 	"bytes"
 	"encoding/json"
 	"strconv"
+	"strings"
 
 	"github.com/hyperledger/fabric-chaincode-go/shim"
 	pb"github.com/hyperledger/fabric-protos-go/peer"
@@ -14,6 +15,11 @@ type A struct {
 
 }
 
+const INIT_DATA = "init_data"
+const GATEWAY_PRE = "gateway"
+const ASSET_PRE = "asset"
+const PROTOCOL_VERSION = "1.0.0"
+
 const TxResultEnum = {'INIT':'0',   'ACK_SUCCESS':'1',  'ACK_FAIL':'2',     'ACK_TIMEOUT':'3'}
 const TxRefundedEnum = {'NONE':'0',     'TODO':'1',     'REFUNDED': '2'}
 
@@ -21,7 +27,7 @@ type InitData struct{
 	ChainCode     string `json:"chainCode"`
 	CreateTime    string `json:"createTime"`
 	CreateAccount string `json:"createAccount"`
-	Managers      string `json:"managers"`
+	Managers      []string `json:"managers"`
 	IsRelay       string `json:"isRelay"`
 	BlockHeight   string `json:"blockHeight"`
 }
@@ -46,10 +52,46 @@ type CrossTx struct {
 
 func (t *A) Init (stub shim.ChaincodeStubInterface) pb.Response {
 
-	args := stub.GetStringArgs()
+	_, args := stub.GetFunctionAndParameters() // Input: "init, args[0], args[1] ..."
+	if len(args) != 3 {
+		return shim.Error("Incorrect arguments. Expecting a key and a value0")
+	}
+	chainCode := args[0]
+	isRelay := args[1]
+	managersList := args[2]
+
 	err :=  stub.PutState(args[0],[]byte(args[1]))
 	if err != nil {
-		shim.Error(err.Error())
+		return shim.Error(err.Error())
+	}
+	managers := strings.Split(managersList, "&")
+
+	CreateTime, err := stub.GetTxTimestamp()
+	if err != nil {
+		return shim.Error(err.Error())
+	}
+
+	creator, err := stub.GetCreator()
+	certStart := bytes.IndexAny(creator, "-----BEGIN")
+	if certStart == -1 {
+		return shim.Error("no certificate found")
+	}
+
+	var initdata = InitData{
+		ChainCode:     chainCode,
+		CreateTime:    string(CreateTime),
+		CreateAccount: string(creator[certStart:]),
+		Managers:      managers,
+		IsRelay:       isRelay,
+		BlockHeight:   "fabric",
+	}
+	initdataJon, err := json.Marshal(initdata)
+	if err != nil {
+		return shim.Error(err.Error())
+	}
+	err = stub.PutState(INIT_DATA,initdataJon)
+	if err != nil {
+		return shim.Error(err.Error())
 	}
 
 	return shim.Success(nil)
@@ -82,21 +124,6 @@ func (t *A) Invoke (stub shim.ChaincodeStubInterface) pb.Response {
 	return shim.Error("Invoke fn error")
 }
 
-func init_data(stub shim.ChaincodeStubInterface, input []string){
-	var initdata = InitData{
-		ChainCode:     input[0],
-		CreateTime:    input[1],
-		CreateAccount: input[2],
-		Managers:      input[3],
-		IsRelay:       input[4],
-		BlockHeight:   input[5],
-	}
-	err := stub.PutState("init_data",[]byte(initdata))
-	if err != nil {
-		return shim.Error(err.Error())
-	}
-}
-
 func verifyManager(stub shim.ChaincodeStubInterface,){
 	manager_list,err := stub.GetState("init_data")
 	if err != nil {
@@ -110,11 +137,15 @@ func verifyManager(stub shim.ChaincodeStubInterface,){
 
 func (t *A) setGateway (stub shim.ChaincodeStubInterface, args []string) pb.Response{
 
-	if len(args) != 2 {
+	if len(args) != 3 {
 		return fmt.Errorf("Incorrect arguments. Expecting a key and value")
 	}
+	chainChode := args[0]
+	gatewayList := args[1]
+	remark := args[2]
+
 	//判断超级节点
-	verifyManager(stub);
+	verifyManager(stub)
 	//校验参数
 	//checkSetGatewayParamObj();
 	//保存公证人
@@ -124,8 +155,8 @@ func (t *A) setGateway (stub shim.ChaincodeStubInterface, args []string) pb.Resp
 	}
 
 	//log
-	var event = args[1]+args[2];
-	stub.setEvent("setGateway",event);
+	var event = chainChode + gatewayList
+	stub.setEvent("setGateway",event)
 
 	return shim.Success(nil)
 }
@@ -454,7 +485,7 @@ func (t *A)  getCrossTx(stub shim.ChaincodeStubInterface, args []string) pb.Resp
 }
 
 func (t *A)  version (stub shim.ChaincodeStubInterface, args []string) pb.Response {
-	return shim.Success("1.0.0")
+	return shim.Success(PROTOCOL_VERSION)
 }
 
 
